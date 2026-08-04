@@ -1,4 +1,3 @@
-# grid_game.py
 import random
 
 
@@ -10,20 +9,25 @@ class GridHuntGame:
         self.height = height
         self.agent_pos = [0, 0]  # Starting position (x, y)
 
-        # Place a few random food pellets and obstacles (walls)
-        self.food_positions = {[1, 2], [2, 3], [3, 0], [2, 1]}
-        self.walls = {[1, 1], [2, 2]}
+        # Place food pellets and obstacles using tuple coordinates
+        self.food_positions = {(1, 2), (2, 3), (3, 0), (2, 1)}
+        self.walls = {(1, 1), (2, 2)}
+
+        # Step 2.1: Declare toxic traps (avoiding (0,0), walls, and food)
+        self.toxic_traps = {(0, 3), (3, 2)}
 
         self.score = 0
         self.steps = 0
 
-    def get_percept(self, agent) -> dict:
+    def get_percept(self, agent=None) -> dict:
         return {
             'agent_pos': list(self.agent_pos),
             'smells_food': tuple(self.agent_pos) in self.food_positions,
             'hit_wall': tuple(self.agent_pos) in self.walls,
             'score': self.score,
-            'remaining_food': len(self.food_positions)
+            'remaining_food': len(self.food_positions),
+            # Step 2.2: Add toxin sensor
+            'smells_toxin': tuple(self.agent_pos) in self.toxic_traps
         }
 
     def execute_action(self, agent, action: str):
@@ -45,11 +49,16 @@ class GridHuntGame:
         else:
             self.agent_pos = new_pos
 
-        # Check if eating food
         tuple_pos = tuple(self.agent_pos)
+
+        # Check if eating food
         if tuple_pos in self.food_positions:
             self.food_positions.remove(tuple_pos)
             self.score += 20  # Reward for eating food pellet
+
+        # Step 2.3: Check if stepped on a toxic trap
+        if tuple_pos in self.toxic_traps:
+            self.score -= 15  # 15 points penalty for toxic trap
 
     def is_done(self) -> bool:
         return len(self.food_positions) == 0 or self.steps >= 20
