@@ -1,3 +1,4 @@
+# visual_grid_game.py
 import random
 import tkinter as tk
 
@@ -13,6 +14,7 @@ class VisualGridHuntGame:
         if custom_walls is not None:
             self.walls = set(custom_walls)
         else:
+            # Generate some default scattered walls for a larger grid
             self.walls = {(2, 2), (2, 3), (5, 5), (6, 5), (3, 7)}
 
         # Dynamically generate random food positions avoiding walls and agent start
@@ -41,10 +43,7 @@ class VisualGridHuntGame:
             ox = random.randint(0, self.width - 1)
             oy = random.randint(0, self.height - 1)
             op_pos = [ox, oy]
-            if (tuple(op_pos) != (0, 0) and 
-                tuple(op_pos) not in self.walls and 
-                tuple(op_pos) not in self.food_positions and 
-                tuple(op_pos) not in self.toxic_traps):
+            if tuple(op_pos) != (0, 0) and tuple(op_pos) not in self.walls and tuple(op_pos) not in self.food_positions:
                 self.opponents.append(op_pos)
 
         self.score = 0
@@ -94,7 +93,6 @@ class VisualGridHuntGame:
         if tuple_pos in self.toxic_traps:
             self.score -= 15
 
-        # Move opponents
         for op in self.opponents:
             move = random.choice(['Up', 'Down', 'Left', 'Right', 'Stay'])
             if move == 'Up' and op[1] < self.height - 1:
@@ -124,6 +122,7 @@ class GridGameGUI:
         self.env = VisualGridHuntGame(width=width, height=height, num_food=num_food, num_opponents=num_opponents,
                                       custom_walls=walls)
 
+        # Dynamically calculate cell size so the total canvas fits nicely within a 600x600 window ceiling
         max_canvas_dim = 600
         self.cell_size = max(20, min(max_canvas_dim // self.env.width, max_canvas_dim // self.env.height))
 
@@ -145,7 +144,6 @@ class GridGameGUI:
     def draw_grid(self):
         self.canvas.delete("all")
 
-        # Draw Grid background and walls
         for x in range(self.env.width):
             for y in range(self.env.height):
                 x1 = x * self.cell_size
@@ -156,6 +154,7 @@ class GridGameGUI:
                 color = "#f1f5f9" if (x, y) not in self.env.walls else "#64748b"
                 self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline="#cbd5e1")
 
+                # Only draw text if cell is large enough
                 if self.cell_size >= 40 and (x, y) in self.env.walls:
                     self.canvas.create_text(x1 + self.cell_size / 2, y1 + self.cell_size / 2, text="W", fill="white",
                                             font=("Arial", 8, "bold"))
@@ -168,7 +167,6 @@ class GridGameGUI:
             self.canvas.create_oval(x1, y1, x1 + self.cell_size * 0.6, y1 + self.cell_size * 0.6, 
                                     fill="purple", outline="#4a0080")
 
-        # Draw Food pellets (Amber ovals)
         for fx, fy in self.env.food_positions:
             offset = self.cell_size * 0.25
             x1 = fx * self.cell_size + offset
@@ -176,7 +174,6 @@ class GridGameGUI:
             self.canvas.create_oval(x1, y1, x1 + self.cell_size * 0.5, y1 + self.cell_size * 0.5, fill="#f59e0b",
                                     outline="#d97706")
 
-        # Draw Opponents (Red squares)
         for ox, oy in self.env.opponents:
             offset = self.cell_size * 0.2
             x1 = ox * self.cell_size + offset
@@ -184,7 +181,6 @@ class GridGameGUI:
             self.canvas.create_rectangle(x1, y1, x1 + self.cell_size * 0.6, y1 + self.cell_size * 0.6, fill="#990000",
                                          outline="#7a0000")
 
-        # Draw Agent (Blue oval)
         ax, ay = self.env.agent_pos
         offset = self.cell_size * 0.15
         x1 = ax * self.cell_size + offset
@@ -213,5 +209,6 @@ class GridGameGUI:
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = GridGameGUI(root, width=12, height=12, num_food=15, num_opponents=2)
+    # Try a larger grid size like 12x12 with 15 food and 3 opponents!
+    app = GridGameGUI(root, width=12, height=12, num_food=15, num_opponents=0)
     root.mainloop()
