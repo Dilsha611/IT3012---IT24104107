@@ -26,15 +26,16 @@ class VisualGridHuntGame:
             if pos_tuple != (0, 0) and pos_tuple not in self.walls:
                 self.food_positions.add(pos_tuple)
 
-        # Toxic traps avoid the agent start, walls, and food positions.
+        # Lab 01 – Step 2.1: toxic traps must not overlap the start, walls, or food.
         self.toxic_traps = set()
-        while len(self.toxic_traps) < 4:
+        num_toxic_traps = 4
+        while len(self.toxic_traps) < num_toxic_traps:
             tx = random.randint(0, self.width - 1)
             ty = random.randint(0, self.height - 1)
             trap_pos = (tx, ty)
-            if (trap_pos != (0, 0) and
-                    trap_pos not in self.walls and
-                    trap_pos not in self.food_positions):
+            if (trap_pos != (0, 0)
+                    and trap_pos not in self.walls
+                    and trap_pos not in self.food_positions):
                 self.toxic_traps.add(trap_pos)
 
         # Generate adversarial opponents
@@ -59,7 +60,7 @@ class VisualGridHuntGame:
             'collision': self.collision,
             'score': self.score,
             'remaining_food': len(self.food_positions),
-            # Step 2.2: Add toxin sensor
+            # Lab 01 – Step 2.2: toxin sensor available to the agent.
             'smells_toxin': tuple(self.agent_pos) in self.toxic_traps
         }
 
@@ -76,20 +77,17 @@ class VisualGridHuntGame:
         elif action == 'Right':
             new_pos[0] = min(self.width - 1, new_pos[0] + 1)
 
-        # Check collision with walls
         if tuple(new_pos) in self.walls:
             self.score -= 5
         else:
             self.agent_pos = new_pos
 
         tuple_pos = tuple(self.agent_pos)
-
-        # Check if eating food
         if tuple_pos in self.food_positions:
             self.food_positions.remove(tuple_pos)
             self.score += 20
 
-        # Step 2.3 (Part 1): Check if stepping on toxic trap and deduct 15 points
+        # Lab 01 – Step 2.3: toxic traps reduce the performance score.
         if tuple_pos in self.toxic_traps:
             self.score -= 15
 
@@ -159,12 +157,12 @@ class GridGameGUI:
                     self.canvas.create_text(x1 + self.cell_size / 2, y1 + self.cell_size / 2, text="W", fill="white",
                                             font=("Arial", 8, "bold"))
 
-        # Step 2.3 (Part 2): Draw toxic traps (Purple circles)
+        # Lab 01 – Step 2.3: render toxic traps as purple circles.
         for tx, ty in self.env.toxic_traps:
             offset = self.cell_size * 0.2
             x1 = tx * self.cell_size + offset
             y1 = (self.env.height - 1 - ty) * self.cell_size + offset
-            self.canvas.create_oval(x1, y1, x1 + self.cell_size * 0.6, y1 + self.cell_size * 0.6, 
+            self.canvas.create_oval(x1, y1, x1 + self.cell_size * 0.6, y1 + self.cell_size * 0.6,
                                     fill="purple", outline="#4a0080")
 
         for fx, fy in self.env.food_positions:
