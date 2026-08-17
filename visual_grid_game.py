@@ -1,8 +1,6 @@
 # visual_grid_game.py
 import random
 import tkinter as tk
-from collections import deque
-from tkinter import ttk
 
 
 class VisualGridHuntGame:
@@ -77,7 +75,6 @@ class VisualGridHuntGame:
 
         self.score = 0
         self.steps = 0
-        self.max_steps = max(60, self.width * self.height * 4)
         self.collision = False
 
     def get_percept(self) -> dict:
@@ -98,14 +95,6 @@ class VisualGridHuntGame:
             'collision': self.collision,
             'score': self.score,
             'remaining_food': len(self.food_positions),
-            # Goal- and utility-based programs need a state representation in
-            # order to project future states.  Reflex agents deliberately
-            # ignore these fields and use only the local sensors above.
-            'position': tuple(self.agent_pos),
-            'food_positions': frozenset(self.food_positions),
-            'walls': frozenset(self.walls),
-            'grid_size': (self.width, self.height),
-            'opponent_positions': tuple(map(tuple, self.opponents)),
         }
 
     def execute_action(self, action: str):
@@ -153,9 +142,7 @@ class VisualGridHuntGame:
                 self.collision = True
 
     def is_done(self) -> bool:
-        return (len(self.food_positions) == 0
-                or self.steps >= self.max_steps
-                or self.collision)
+        return len(self.food_positions) == 0 or self.steps >= 60 or self.collision
 
 
 class SimpleReflexAgent:
@@ -170,340 +157,105 @@ class SimpleReflexAgent:
             return 'turn_left'
         return 'move_forward'
 
-    # The tutorial calls the agent entry point ``evaluate``.  Keep the GUI's
-    # ``sense_and_act`` name too so the same class works in both contexts.
-    def evaluate(self, percept: dict) -> str:
-        return self.sense_and_act(percept)
-
 
 class ModelBasedAgent:
-    """A reflex agent with an internal model of percept and action history."""
+    """Step 1.3: keeps an internal model (transition model) of its own
+    position and heading, built purely from the actions it has chosen to
+    take (it still never sees the environment's real agent_pos). This lets
+    it recognise "I've already been here" and break out of loops that trap
+    the SimpleReflexAgent."""
+
+    FACING_OFFSETS = VisualGridHuntGame.FACING_OFFSETS
+    TURN_LEFT = VisualGridHuntGame.TURN_LEFT
+    TURN_RIGHT = VisualGridHuntGame.TURN_RIGHT
 
     def __init__(self):
-        self.internal_state = {
-            "percept_history": [],
-            "action_history": [],
-            "last_action": None,
-            "repeated_blockages": 0,
-            "visited": {(0, 0)},
-            "position": (0, 0),
-            "facing": "Up",
-        }
+        self.rel_pos = (0, 0)          # believed position, relative to start
+        self.facing = 'Up'             # believed heading, relative to start
+        self.visited_cells = {(0, 0)}
+        self.last_action = None
+        self.last_percept = None
 
-    def _process_percept(self, percept: dict):
-        history = self.internal_state["percept_history"]
-        history.append(dict(percept))
-        if len(history) > 20:
-            del history[0]
+    def _update_state(self, percept: dict):
+        """Transition model: given the action we just took, predict how our
+        internal position/heading changed. We only ever call move_forward
+        when the previous percept said wall_ahead is False, so it's safe to
+        assume the move succeeded. Sensor model: also record the raw percept
+        that triggered this update, for reference/debugging."""
+        self.last_percept = percept
 
-        if percept["wall_ahead"]:
-            self.internal_state["repeated_blockages"] += 1
-        else:
-            self.internal_state["repeated_blockages"] = 0
+        if self.last_action == 'move_forward':
+            dx, dy = self.FACING_OFFSETS[self.facing]
+            self.rel_pos = (self.rel_pos[0] + dx, self.rel_pos[1] + dy)
+        elif self.last_action == 'turn_left':
+            self.facing = self.TURN_LEFT[self.facing]
+        elif self.last_action == 'turn_right':
+            self.facing = self.TURN_RIGHT[self.facing]
 
-    def _record_action_effect(self, action):
-        if action is None:
-            return
-        facing = self.internal_state["facing"]
-        if action == "turn_left":
-            facing = VisualGridHuntGame.TURN_LEFT[facing]
-        elif action == "turn_right":
-            facing = VisualGridHuntGame.TURN_RIGHT[facing]
-        elif action == "move_forward":
-            dx, dy = VisualGridHuntGame.FACING_OFFSETS[facing]
-            x, y = self.internal_state["position"]
-            self.internal_state["position"] = (x + dx, y + dy)
-            self.internal_state["visited"].add((x + dx, y + dy))
-        self.internal_state["facing"] = facing
-
-    def _find_action(self, percept: dict) -> str:
-        if percept["food_here"]:
-            return "suck"
-        if not percept["wall_ahead"]:
-            return "move_forward"
-
-        # Use remembered action history to avoid repeating the stateless
-        # agent's identical response when the same blocked percept recurs.
-        return (
-            "turn_right"
-            if self.internal_state["last_action"] == "turn_left"
-            else "turn_left"
-        )
-
-    def evaluate(self, percept: dict, last_action=None) -> str:
-        # Tutorial 02 order: observe the current percept, apply the effect of
-        # the PREVIOUS action, then match a rule against the updated model.
-        previous_action = (
-            last_action
-            if last_action is not None
-            else self.internal_state["last_action"]
-        )
-        self._process_percept(percept)
-        self._record_action_effect(previous_action)
-        action = self._find_action(percept)
-        self.internal_state["last_action"] = action
-        self.internal_state["action_history"].append(action)
-        return action
+        self.visited_cells.add(self.rel_pos)
 
     def sense_and_act(self, percept: dict) -> str:
-        return self.evaluate(percept)
+        self._update_state(percept)
 
+        if percept['food_here']:
+            action = 'suck'
+        elif percept['wall_ahead']:
+            # Check memory before deciding which way to turn: if we already
+            # visited the cell to our left, turning left just repeats the
+            # loop the SimpleReflexAgent gets stuck in, so try right instead.
+            left_facing = self.TURN_LEFT[self.facing]
+            ldx, ldy = self.FACING_OFFSETS[left_facing]
+            left_cell = (self.rel_pos[0] + ldx, self.rel_pos[1] + ldy)
 
-class GoalBasedAgent:
-    """Uses breadth-first search to plan toward the nearest remaining food."""
+            action = 'turn_right' if left_cell in self.visited_cells else 'turn_left'
+        else:
+            action = 'move_forward'
 
-    def __init__(self, target_goal=0):
-        self.target_goal = target_goal
-
-    def _goal_reached(self, percept: dict) -> bool:
-        return percept["remaining_food"] == self.target_goal
-
-    @staticmethod
-    def _absolute_to_relative(direction: str, facing: str) -> str:
-        if direction == facing:
-            return "move_forward"
-        if direction == VisualGridHuntGame.TURN_LEFT[facing]:
-            return "turn_left"
-        if direction == VisualGridHuntGame.TURN_RIGHT[facing]:
-            return "turn_right"
-        return "turn_right"  # turn twice on successive planning cycles
-
-    def _project_path(self, percept: dict) -> str:
-        if percept["food_here"]:
-            return "suck"
-
-        start = percept["position"]
-        goals = set(percept["food_positions"])
-        walls = set(percept["walls"])
-        width, height = percept["grid_size"]
-        queue = deque([(start, [])])
-        visited = {start}
-        directions = (
-            ("Up", 0, 1), ("Down", 0, -1),
-            ("Left", -1, 0), ("Right", 1, 0),
-        )
-
-        while queue:
-            position, path = queue.popleft()
-            if position in goals and path:
-                return self._absolute_to_relative(path[0], percept["facing"])
-            for direction, dx, dy in directions:
-                neighbour = (position[0] + dx, position[1] + dy)
-                if (0 <= neighbour[0] < width and 0 <= neighbour[1] < height
-                        and neighbour not in walls and neighbour not in visited):
-                    visited.add(neighbour)
-                    queue.append((neighbour, path + [direction]))
-
-        return "halt"
-
-    def evaluate(self, percept: dict) -> str:
-        if self._goal_reached(percept):
-            return "halt"
-        return self._project_path(percept)
-
-    def sense_and_act(self, percept):
-        return self.evaluate(percept)
-
-
-class UtilityBasedAgent:
-    """Chooses the action whose simulated outcome has greatest utility."""
-
-    POSSIBLE_ACTIONS = ("suck", "move_forward", "turn_left", "turn_right")
-
-    def __init__(self):
-        self.action_utilities = {
-            "suck": 100.0,
-            "move_forward": 10.0,
-            "turn_left": 4.0,
-            "turn_right": 4.0,
-        }
-
-    def simulate_action(self, percept: dict, action: str) -> dict:
-        outcome = dict(percept)
-        outcome["action"] = action
-        outcome["valid"] = not (
-            (action == "suck" and not percept["food_here"])
-            or (action == "move_forward" and percept["wall_ahead"])
-        )
-        if action == "move_forward" and outcome["valid"]:
-            dx, dy = VisualGridHuntGame.FACING_OFFSETS[percept["facing"]]
-            x, y = percept["position"]
-            outcome["position"] = (x + dx, y + dy)
-        return outcome
-
-    def compute_utility(self, outcome: dict) -> float:
-        if not outcome["valid"]:
-            return float("-inf")
-
-        action = outcome["action"]
-        utility = self.action_utilities[action]
-        if action == "suck" and outcome["food_here"]:
-            utility += 20
-        foods = outcome.get("food_positions", ())
-        if action == "move_forward" and foods:
-            x, y = outcome["position"]
-            distance = min(abs(x - fx) + abs(y - fy) for fx, fy in foods)
-            utility += max(0, 12 - distance)
-        if outcome.get("position") in outcome.get("opponent_positions", ()):
-            utility -= 100
-        if outcome.get("smells_toxin", False) and action == "move_forward":
-            utility += 20  # Leaving a toxic cell is preferable to lingering.
-        return utility
-
-    def evaluate(self, percept: dict, possible_actions=None) -> str:
-        actions = possible_actions or self.POSSIBLE_ACTIONS
-        optimal_action = None
-        max_utility = float("-inf")
-        for action in actions:
-            score = self.compute_utility(self.simulate_action(percept, action))
-            if score > max_utility:
-                max_utility = score
-                optimal_action = action
-        return optimal_action
-
-    def sense_and_act(self, percept):
-        return self.evaluate(percept)
-
-
-class LearningAgent:
-    def __init__(self):
-        self.performance_controller = UtilityBasedAgent()
-        self.environment_critic = self._score_outcome
-        self.adaptive_learner = self._adjust_parameters
-        self.previous_score = None
-        self.previous_action = None
-        self.feedback_history = []
-        self.learning_rate = 0.1
-
-    def _score_outcome(self, percept: dict) -> float:
-        current_score = percept.get("score", 0)
-        feedback = 0 if self.previous_score is None else current_score - self.previous_score
-        self.previous_score = current_score
-        return feedback
-
-    def _adjust_parameters(self, feedback: float):
-        self.feedback_history.append(feedback)
-        if len(self.feedback_history) > 50:
-            del self.feedback_history[0]
-
-        # The feedback describes the result of the previous action.  Adjust
-        # that action's utility so future choices improve from experience.
-        if self.previous_action is not None:
-            old_utility = self.performance_controller.action_utilities[
-                self.previous_action
-            ]
-            self.performance_controller.action_utilities[self.previous_action] = (
-                old_utility + self.learning_rate * feedback
-            )
-
-    def execute_step(self, percept: dict) -> str:
-        # Tutorial 02 order: performance controller selects an action, the
-        # critic evaluates feedback, then the learner adapts future behaviour.
-        action = self.performance_controller.evaluate(percept)
-        feedback = self.environment_critic(percept)
-        self.adaptive_learner(feedback)
-        self.previous_action = action
+        self.last_action = action
         return action
-
-    def sense_and_act(self, percept):
-        return self.execute_step(percept)
-
-    def evaluate(self, percept: dict) -> str:
-        return self.execute_step(percept)
 
 
 class GridGameGUI:
-    """Visual comparison tool for the five Tutorial 02 agent programs."""
+    """Tkinter wrapper that dynamically scales cell sizes to keep larger grids on screen."""
 
-    AGENT_CLASSES = {
-        "Simple Reflex": SimpleReflexAgent,
-        "Model-Based Reflex": ModelBasedAgent,
-        "Goal-Based": GoalBasedAgent,
-        "Utility-Based": UtilityBasedAgent,
-        "Learning": LearningAgent,
-    }
-
-    def __init__(self, root, width=10, height=10, num_food=12, num_opponents=2, num_traps=0, walls=None,
+    def __init__(self, root, width=10, height=10, num_food=12, num_opponents=2, num_traps=5, walls=None,
                  agent_class=SimpleReflexAgent):
         self.root = root
-        self.root.title("IT3012 - Tutorial 02: Agent Architectures")
-        self.config = dict(width=width, height=height, num_food=num_food,
-                           num_opponents=num_opponents, num_traps=num_traps,
-                           custom_walls=walls)
-        self.running = False
-        self.after_id = None
+        self.root.title("IT3012 - Scalable Multi-Agent Grid Hunt")
 
-        self.env = VisualGridHuntGame(**self.config)
-        self.agent = agent_class()
-        default_name = next(
-            name for name, cls in self.AGENT_CLASSES.items() if cls is agent_class
+        self.env = VisualGridHuntGame(
+            width=width,
+            height=height,
+            num_food=num_food,
+            num_opponents=num_opponents,
+            num_traps=num_traps,
+            custom_walls=walls,
         )
+        self.agent = agent_class()
 
         # Leave room below the canvas for the label, button, taskbar, and
         # window title bar so they never get pushed off the bottom of the
         # screen. winfo_screenheight() reports the FULL monitor height, it
         # does not subtract the taskbar, so we reserve extra margin for that.
         screen_h = root.winfo_screenheight()
-        reserved_for_controls = 280
+        reserved_for_controls = 220
         max_canvas_dim = min(600, screen_h - reserved_for_controls)
         self.cell_size = max(20, min(max_canvas_dim // self.env.width, max_canvas_dim // self.env.height))
 
         canvas_w = self.env.width * self.cell_size
         canvas_h = self.env.height * self.cell_size
 
-        header = tk.Frame(root, bg="#0f172a", padx=14, pady=10)
-        header.pack(fill="x")
-        tk.Label(header, text="Tutorial 02 • Agent Architecture Lab",
-                 bg="#0f172a", fg="white", font=("Segoe UI", 15, "bold")).pack()
+        self.canvas = tk.Canvas(root, width=canvas_w, height=canvas_h, bg="white")
+        self.canvas.pack()
 
-        self.canvas = tk.Canvas(root, width=canvas_w, height=canvas_h,
-                                bg="white", highlightthickness=0)
-        self.canvas.pack(padx=12, pady=(10, 4))
+        self.label = tk.Label(root, text="Score: 0 | Steps: 0", font=("Arial", 14))
+        self.label.pack(pady=10)
 
-        self.status_label = tk.Label(
-            root, text="Ready", font=("Segoe UI", 11, "bold"), fg="#0f172a"
-        )
-        self.status_label.pack(pady=(4, 2))
-        self.detail_label = tk.Label(
-            root, text="Score: 0  •  Steps: 0  •  Food remaining: 0",
-            font=("Segoe UI", 10), fg="#475569"
-        )
-        self.detail_label.pack()
-
-        controls = tk.Frame(root)
-        controls.pack(pady=9)
-        tk.Label(controls, text="Agent:", font=("Segoe UI", 10)).grid(
-            row=0, column=0, padx=5
-        )
-        self.agent_choice = ttk.Combobox(
-            controls, state="readonly", width=21,
-            values=list(self.AGENT_CLASSES), font=("Segoe UI", 10)
-        )
-        self.agent_choice.set(default_name)
-        self.agent_choice.grid(row=0, column=1, padx=5)
-
-        self.start_btn = tk.Button(
-            controls, text="Start", command=self.run_loop, width=10,
-            bg="#1d4ed8", fg="white", font=("Segoe UI", 10, "bold")
-        )
-        self.start_btn.grid(row=0, column=2, padx=5)
-        self.pause_btn = tk.Button(
-            controls, text="Pause", command=self.pause, width=10,
-            bg="#475569", fg="white", font=("Segoe UI", 10, "bold")
-        )
-        self.pause_btn.grid(row=0, column=3, padx=5)
-        tk.Button(
-            controls, text="Reset", command=self.reset, width=10,
-            font=("Segoe UI", 10, "bold")
-        ).grid(row=0, column=4, padx=5)
-
-        tk.Label(
-            root, text="● Agent    ● Food    ■ Wall    ■ Opponent",
-            font=("Segoe UI", 9), fg="#64748b"
-        ).pack(pady=(0, 8))
+        self.btn = tk.Button(root, text="Start Simulation", command=self.run_loop, font=("Arial", 12), bg="#000066",
+                             fg="white")
+        self.btn.pack(pady=5)
 
         self.draw_grid()
-        self._update_status("Ready", "No action")
         self._center_window(root)
 
     @staticmethod
@@ -576,92 +328,38 @@ class GridGameGUI:
             self.canvas.create_rectangle(x1, y1, x1 + self.cell_size * 0.6, y1 + self.cell_size * 0.6, fill="#990000",
                                          outline="#7a0000")
 
-        # Draw a directional agent so its internal heading is visible.
         ax, ay = self.env.agent_pos
-        cx = (ax + 0.5) * self.cell_size
-        cy = (self.env.height - ay - 0.5) * self.cell_size
-        radius = self.cell_size * 0.32
-        points = {
-            "Up": (cx, cy - radius, cx - radius, cy + radius, cx + radius, cy + radius),
-            "Down": (cx, cy + radius, cx - radius, cy - radius, cx + radius, cy - radius),
-            "Left": (cx - radius, cy, cx + radius, cy - radius, cx + radius, cy + radius),
-            "Right": (cx + radius, cy, cx - radius, cy - radius, cx - radius, cy + radius),
-        }
-        self.canvas.create_polygon(*points[self.env.facing], fill="#1d4ed8",
-                                   outline="#1e3a8a", width=2)
-
-    def _update_status(self, message, action):
-        self.status_label.config(text=message)
-        self.detail_label.config(
-            text=(f"Score: {self.env.score}  •  Steps: {self.env.steps}  •  "
-                  f"Food remaining: {len(self.env.food_positions)}  •  "
-                  f"Facing: {self.env.facing}  •  Action: {action}")
-        )
-
-    def reset(self):
-        self.pause()
-        agent_class = self.AGENT_CLASSES[self.agent_choice.get()]
-        self.env = VisualGridHuntGame(**self.config)
-        self.agent = agent_class()
-        self.draw_grid()
-        self._update_status(f"Ready — {self.agent_choice.get()}", "None")
-        self.start_btn.config(text="Start")
-
-    def pause(self):
-        self.running = False
-        if self.after_id is not None:
-            self.root.after_cancel(self.after_id)
-            self.after_id = None
-        self.start_btn.config(text="Resume")
+        offset = self.cell_size * 0.15
+        x1 = ax * self.cell_size + offset
+        y1 = (self.env.height - 1 - ay) * self.cell_size + offset
+        self.canvas.create_oval(x1, y1, x1 + self.cell_size * 0.7, y1 + self.cell_size * 0.7, fill="#000066",
+                                outline="#1e3a8a")
 
     def run_loop(self):
-        if self.env.is_done():
-            self.reset()
-        self.running = True
-        self.start_btn.config(text="Running", state="disabled")
-        self.agent_choice.config(state="disabled")
+        self.btn.config(state="disabled")
 
         def step():
-            if not self.running:
-                self.start_btn.config(state="normal")
-                self.agent_choice.config(state="readonly")
-                return
             if not self.env.is_done():
                 percept = self.env.get_percept()
                 action = self.agent.sense_and_act(percept)
-                if action == "halt":
-                    self.running = False
-                    self._update_status("Goal reached — agent halted", action)
-                    self.start_btn.config(text="Start", state="normal")
-                    self.agent_choice.config(state="readonly")
-                    return
                 self.env.execute_action(action)
 
                 self.draw_grid()
-                self._update_status(f"Running — {self.agent_choice.get()}", action)
-                self.after_id = self.root.after(220, step)
+                self.label.config(text=f"Score: {self.env.score} | Steps: {self.env.steps} | Action: {action}")
+                self.root.after(250, step)
             else:
-                self.running = False
-                if self.env.collision:
-                    reason = "Stopped — collision"
-                elif not self.env.food_positions:
-                    reason = "Goal completed — all food collected"
-                else:
-                    reason = f"Stopped — {self.env.max_steps}-step limit reached"
-                self._update_status(reason, "None")
-                self.start_btn.config(text="Start", state="normal")
-                self.agent_choice.config(state="readonly")
+                end_text = f"Collision! Game Over! Final Score: {self.env.score}" if self.env.collision else f"Finished! Final Score: {self.env.score}"
+                self.label.config(text=end_text)
+                self.btn.config(state="normal")
 
         step()
 
 
 if __name__ == "__main__":
     root = tk.Tk()
-    # Change only this line to compare the five Tutorial 02 architectures:
-    # SimpleReflexAgent, ModelBasedAgent, GoalBasedAgent,
-    # UtilityBasedAgent, or LearningAgent.
-    ACTIVE_AGENT_CLASS = GoalBasedAgent
-    app = GridGameGUI(root, width=12, height=12, num_food=15,
-                       num_opponents=0, num_traps=0,
-                       agent_class=ACTIVE_AGENT_CLASS)
+    # Step 1.2: run with SimpleReflexAgent first and watch it get stuck in a
+    # corner/U-shaped wall loop. Step 1.3: switch agent_class to
+    # ModelBasedAgent and re-run to see it remember visited cells and escape.
+    app = GridGameGUI(root, width=12, height=12, num_food=15, num_opponents=0,
+                       agent_class=SimpleReflexAgent)
     root.mainloop()
