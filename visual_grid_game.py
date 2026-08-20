@@ -203,14 +203,6 @@ class GridGameGUI:
                         font=("Arial", 8, "bold")
                     )
 
-        # Lab 01 – Step 2.3: render toxic traps as purple circles.
-        for tx, ty in self.env.toxic_traps:
-            offset = self.cell_size * 0.2
-            x1 = tx * self.cell_size + offset
-            y1 = (self.env.height - 1 - ty) * self.cell_size + offset
-            self.canvas.create_oval(x1, y1, x1 + self.cell_size * 0.6, y1 + self.cell_size * 0.6,
-                                    fill="purple", outline="#4a0080")
-
         for fx, fy in self.env.food_positions:
             offset = self.cell_size * 0.25
 
